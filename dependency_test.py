@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python3
 from sys import version_info
 if version_info < (3, 6, 0):
     raise RuntimeError("Not intended to run on the Python less than '3.6.0' Got version: '%s.%s.%s'" % version_info[:3])
