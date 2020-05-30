@@ -7,18 +7,20 @@ if version_info < (3, 7, 0):
     try:
         import async_generator
     except ImportError:
-        raise ImportError("You should install 'async_generator' package to run tests in Python 3.6")
-try:
-    import coverage
-except ImportError:
-    raise ImportError("You should install 'coverage' package to run tests")
+        raise ImportError("You should install 'async_generator' package to run tests in Python %s.%s.%s"
+                          % version_info[:3])
 
 try:
     import pytest
 except ImportError:
-    raise ImportError("You should install 'pytest' package to run tests")
+    raise ImportError("You should install 'pytest' package to run tests in Python %s.%s.%s" % version_info[:3])
 
 try:
     import pytest_asyncio
 except ImportError:
-    raise ImportError("You should install 'pytest_asyncio' package to run tests")
+    raise ImportError("You should install 'pytest_asyncio' package to run tests in Python %s.%s.%s" % version_info[:3])
+
+try:
+    import pytest_cov
+except ImportError:
+    raise ImportError("You should install 'pytest-cov' package to run tests in Python %s.%s.%s" % version_info[:3])
