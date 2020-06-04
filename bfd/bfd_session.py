@@ -116,7 +116,8 @@ class BFDSession:
         `_periodical_send_event` (Event) This event enables or disabled periodical dispatch of Control packets.
         It is always set when `_Role` == `Role.Active` and `_RemoteDemandMode` is False
             Otherwise it sets only if packet dispatch is necessary
-        `_immediate_send_event` (Event) This event allows immediate sending of the CtlPacket
+        `_immediate_send_event` (Event) This event allows immediate sending of a CtlPacket.
+        According on https://tools.ietf.org/html/rfc5880#section-6.8.3 it happens when the TX interval time decreases
         `_StateFutures` (Dict). This dict holds Futures to work and await
         specific session state (AdminDown, Down, Init, Up)
         `_recv_queue` (Queue). BFD daemon puts packets into this queue. This queue is handled by recv loop
@@ -176,6 +177,7 @@ class BFDSession:
     def _set_LocalDiscr(self, value: int):
         if self._LocalDiscr != value:
             self._LocalDiscr = value
+            self.name = str(self._LocalDiscr)
             self._logger.info("%s LocalDiscr changed to %s" % (repr(self), value))
             self._schedule_task(self.poll())
 
@@ -203,8 +205,8 @@ class BFDSession:
             self._logger.info("%s DemandMode changed to %s." % (repr(self), value))
             self._recalc_detect_time()
             self._update_permission_to_send()
-            if value:
-                self._recv_queue.put_nowait(None)     # TODO: should be await put somewhere
+            if value:   # the read timeout renewal
+                self._recv_queue.put_nowait(None)
             self._schedule_task(self.poll())
 
     DemandMode: bool = property(fset=_set_DemandMode, fget=lambda self: self._DemandMode)
@@ -223,7 +225,8 @@ class BFDSession:
     def _set_RemoteMinRxInterval(self, value: int):
         if self._RemoteMinRxInterval != value:
             if value:
-                self._logger.info("%s RemoteMinRxInterval changed to %s" % (repr(self), value))
+                self._logger.info("%s RemoteMinRxInterval changed %s => %s" %
+                                  (repr(self), self._RemoteMinRxInterval, value))
             else:
                 self._logger.info("%s Remote request to cease packet transmission" % repr(self))
             self._RemoteMinRxInterval = value
@@ -305,11 +308,9 @@ class BFDSession:
             elif state == SessionState.Init:
                 self.counters.chstate_init += 1
                 self.LocalDiag = Diag.NoDiag
-                self._immediate_send_event.set()
             else:   # Up:
                 self.counters.chstate_up += 1
                 self.LocalDiag = Diag.NoDiag
-                self._immediate_send_event.set()
             self._recalc_tx_intvl()
             self._recalc_detect_time()
             self._update_permission_to_send()
@@ -374,16 +375,17 @@ class BFDSession:
         :return:
         """
         self._logger.debug("%s: Recalc TX intvl" % repr(self))
-        transmit_intvl = max(self._RemoteMinRxInterval, self._DesiredMinTxInterval) \
+        tx_intvl: int = max(self._RemoteMinRxInterval, self._DesiredMinTxInterval) \
             if self._SessionState != SessionState.Down else 1_000_000
-        if transmit_intvl != self._local_send_intvl:
-            if self._SessionState == SessionState.Up and transmit_intvl > self._local_send_intvl:
+        if tx_intvl != self._local_send_intvl:
+            if self._SessionState == SessionState.Up and tx_intvl > self._local_send_intvl:
                 self._logger.debug("%s Add poll task TX intvl %s => %s" %
-                              (repr(self), self._local_send_intvl, transmit_intvl))
-                self._schedule_task(self._apply_tx_intvl(transmit_intvl))
+                              (repr(self), self._local_send_intvl, tx_intvl))
+                self._schedule_task(self._apply_tx_intvl(tx_intvl))
             else:
-                self._logger.info("%s change TX intvl: %s => %s" % (repr(self), self._local_send_intvl, transmit_intvl))
-                self._local_send_intvl = transmit_intvl
+                self._logger.info("%s change TX intvl: %s => %s (%s)" %
+                                  (repr(self), self._local_send_intvl, tx_intvl, SessionState(self._SessionState)))
+                self._local_send_intvl = tx_intvl
                 self._immediate_send_event.set()
 
     def _recalc_detect_time(self):
@@ -396,19 +398,20 @@ class BFDSession:
         """
         self._logger.debug("%s: Recalc Detect time" % repr(self))
         if self._SessionState not in (SessionState.Up, SessionState.Init):
-            detection_time: int = 1_000_000
+            new_detect_time: int = 1_000_000
         elif self._DemandMode:
-            detection_time: int = max(self._RemoteMinRxInterval, self._DesiredMinTxInterval) * self._DetectMult
+            new_detect_time: int = max(self._RemoteMinRxInterval, self._DesiredMinTxInterval) * self._DetectMult
         else:
-            detection_time: int = max(self._RequiredMinRxInterval, self._RemoteMinTxInterval) * self._RemoteDetectMult
-        if detection_time != self._DetectionTime:
-            if self._SessionState == SessionState.Up and detection_time < self._DetectionTime:
+            new_detect_time: int = max(self._RequiredMinRxInterval, self._RemoteMinTxInterval) * self._RemoteDetectMult
+        if new_detect_time != self._DetectionTime:
+            if self._SessionState == SessionState.Up and new_detect_time < self._DetectionTime:
                 self._logger.debug("%s Add poll task DetectionTime %s => %s" %
-                              (repr(self), self._DetectionTime, detection_time))
-                self._schedule_task(self._apply_detect_time(detection_time))
+                              (repr(self), self._DetectionTime, new_detect_time))
+                self._schedule_task(self._apply_detect_time(new_detect_time))
             else:
-                self._logger.info("%s change DetectionTime: %s => %s" % (repr(self), self._DetectionTime, detection_time))
-                self._DetectionTime = detection_time
+                self._logger.info("%s change DetectionTime: %s => %s" %
+                                  (repr(self), self._DetectionTime, new_detect_time))
+                self._DetectionTime = new_detect_time
 
     def _stop_send_task(self):
         if self._send_task:
@@ -469,18 +472,23 @@ class BFDSession:
             self.counters.expires += 1
 
     async def _coro_recv_task(self):
+        """
+        Recv task. Awaits for packets from queue during DetectionTime timeout. Awaits forever in DemandMode.
+        Calls _process_msg to handle a ControlPacket
+        :return:
+        """
         while True:
             timeout: Optional[int] = None if self._DemandMode else self._DetectionTime / 1_000_000
             self._logger.debug("%s Detect timeout: %s" % (repr(self), timeout or "infinity (Demand Mode)"))
             try:
                 msg: Optional[CtlPacket] = await wait_for(self._recv_queue.get(), timeout=timeout)
-                if msg:
+                if msg:     # Could be received None at change Demand\Normal Mode
                     self._process_msg(msg)
                     self.counters.pkts_proceed += 1
             except AsyncTimeoutError as e:
                 self._set_sess_expired()
 
-    def _update_sess_fields(self, msg: CtlPacket):  # DesiredMinTxInterval
+    def _update_sess_fields(self, msg: CtlPacket):
         self.RemoteDiscr = msg.my_discr
         self.RemoteSessionState = msg.state
         self.RemoteDemandMode = msg.demand
@@ -557,15 +565,19 @@ class BFDSession:
             Address (added solely for use in tests-tests)
         :return:
         """
-        self._recv_queue.put_nowait(msg)
-        self.counters.pkts_recv += 1
+        if self._SessionState == SessionState.AdminDown:
+            # A sess in AdminDown state doesn't accept messages. Increase counter and do noting
+            self.counters.pkts_discard += 1
+        else:
+            self.counters.pkts_recv += 1
+            self._recv_queue.put_nowait(msg)
 
     async def wait_state(self, state: Optional[int] = None) -> int:
         """
         This coroutine allows to wait specific state of this session or returns at next session change.
         Multiple calls can be executed simultaneously.
         :param state:
-            Awaitable state
+            Awaitable state (None to capture all state changes)
         :return:
             Current state
         """
@@ -618,11 +630,13 @@ class BFDSession:
     def enable(self):
         """
         This is entrypoint. Just shortcut for self.SessionState = SessionState.Down
+        Does nothing if session is enabled.
         :return:
         """
-        self._logger.info("Enable sess: %s" % repr(self))
-        # self._update_permission_to_send()
-        self.SessionState = SessionState.Down
+        if self._SessionState == SessionState.AdminDown:
+            self._logger.info("Enable sess: %s" % repr(self))
+            # self._update_permission_to_send()
+            self.SessionState = SessionState.Down
 
     def _clear_local(self):
         self._logger.debug("%s Cleaning up local variables" % repr(self))

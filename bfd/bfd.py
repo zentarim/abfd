@@ -412,12 +412,8 @@ class BFD:
         else:
             auth_handler: Optional[AuthHandlerObj] = self._auth_by_addr.get(addr[0])
             try:
-                if session.SessionState == SessionState.AdminDown:
-                    # A sess in AdminDown state doesn't accept messages. Increase counter and do noting
-                    session.counters.pkts_discard += 1
-                else:
-                    self._check_auth(session, _auth, auth_handler, mdata)
-                    session.put(msg)
+                self._check_auth(session, _auth, auth_handler, mdata)
+                session.put(msg)
             except BadAuth as e:
                 session.counters.pkts_bad_auth += 1
                 self._logger.error("Bad auth %s" % e)

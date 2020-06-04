@@ -96,6 +96,7 @@ class TestWrap:
 
             def __del__(self):
                 logging.info("Del instance %s" % self)
+
         _list: List[Stub] = [Stub(), Stub()]
         # act
         _list[0].attr = 100
@@ -119,8 +120,10 @@ class TestWrap:
         gc.collect()
         logging.info("Dropping class")
         del _list
+        instances: int = len(WrapInt._instances)
         del Stub
         gc.collect()
+        assert len(WrapInt._instances) == (instances - 1)   # Class Stub is removed. WrapInt._instances must decrease
         await sleep(1)
         # assert
         logging.info('EOT')

@@ -243,9 +243,10 @@ class TestMultipleSessions:
             s100.send_callable, s200.send_callable = s200.put, s100.put
             await sleep(2)
             # act
+            logging.info("Change RX/TX")
             s100.RequiredMinRxInterval = 200_000
-            s200.RequiredMinRxInterval = 200_000
-            s200.DesiredMinTxInterval = 500_000
+            s200.RequiredMinRxInterval = 100_000
+            s200.DesiredMinTxInterval = 600_000
             await sleep(2)
             # assert
             assert s100.counters.chstate_down == s200.counters.chstate_down == 0
