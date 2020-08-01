@@ -3,7 +3,7 @@ from bfd.const import *
 import logging
 import pytest
 from asyncio import sleep
-from typing import List
+# from typing import List
 import gc
 
 
@@ -48,9 +48,6 @@ class TestWrap:
         logging.info("Maxval now: %s (just under threshold)" % max_int)
         obj: Stub = Stub()
         obj.attr = max_int - 1
-        # for i in range(10):
-        #     obj.attr += 1
-        #     logging.error(obj.attr)
         logging.info(obj)
         assert obj.attr == max_int - 1
         # act
@@ -88,51 +85,12 @@ class TestWrap:
         assert obj.attr == max_int - 1
         # assert
 
-    @pytest.mark.asyncio
-    async def test_wrap3(self):
+    @pytest.mark.parametrize("max_int", _max_int)
+    def test_wrap_negative(self, max_int: int):
         # arrange
         class Stub:
-            attr = WrapInt(MAX32)
-
-            def __del__(self):
-                logging.info("Del instance %s" % self)
-
-        _list: List[Stub] = [Stub(), Stub()]
-        # act
-        _list[0].attr = 100
-        _list[1].attr = 200
-        _list[1].attr += 2000000000000000
-        logging.info(_list[1].attr)
-        logging.info("wait 1")
-        await sleep(0.5)
-        logging.info("clearing out")
-        _list.clear()
-        gc.collect()
-        await sleep(0.5)
-        gc.collect()
-        await sleep(0.5)
-        _list: List[Stub] = [Stub(), Stub()]
-        _list[0].attr = 10000
-        gc.collect()
-        await sleep(0.5)
-        _list.pop(0)
-        gc.collect()
-        gc.collect()
-        logging.info("Dropping class")
-        del _list
-        instances: int = len(WrapInt._instances)
-        del Stub
-        gc.collect()
-        assert len(WrapInt._instances) == (instances - 1)   # Class Stub is removed. WrapInt._instances must decrease
-        await sleep(1)
-        # assert
-        logging.info('EOT')
-
-    def test_wrap_negative(self):
-        # arrange
-        class Stub:
-            attr1 = WrapInt(MAX64)
-            attr2 = WrapInt(MAX64)
+            attr1 = WrapInt(max_int)
+            attr2 = WrapInt(max_int)
 
             def __del__(self):
                 logging.info("Del instance %s" % self)
@@ -140,24 +98,23 @@ class TestWrap:
             def __str__(self):
                 return "%s: attr1: %s, attr2: %s" % (clname(self), self.attr1, self.attr2)
 
-
         obj1: Stub = Stub()
         obj2: Stub = Stub()
         # act
         obj1.attr1 = -2
-        obj1.attr2 -= MAX64
+        obj1.attr2 -= max_int
         obj2.attr1 = -5
-        obj2.attr2 -= (MAX64 * 2)
-
+        obj2.attr2 -= (max_int * 2)
+        # assert
         logging.info(obj1)
         logging.info(obj2)
-
-        assert obj1.attr1 == (MAX64 - 2)
+        assert obj1.attr1 == (max_int - 2)
         assert obj1.attr2 == 0
-        assert obj2.attr1 == (MAX64 - 5)
+        assert obj2.attr1 == (max_int - 5)
         assert obj2.attr2 == 0
 
-    def test_wrap_independency(self):
+    @pytest.mark.parametrize("max_int", _max_int)
+    def test_wrap_independency(self, max_int: int):
         # arrange
         class Stub:
             attr1 = WrapInt(MAX64)
@@ -170,8 +127,8 @@ class TestWrap:
                 return "%s: attr1: %s, attr2: %s" % (clname(self), self.attr1, self.attr2)
 
         class Stub2:
-            attr1 = WrapInt(MAX64)
-            attr2 = WrapInt(MAX64)
+            attr1 = WrapInt(max_int)
+            attr2 = WrapInt(max_int)
 
             def __del__(self):
                 logging.info("Del instance %s" % self)
@@ -192,6 +149,7 @@ class TestWrap:
         obj3.attr2 += 13
         obj4.attr1 += 17
         obj4.attr2 += 19
+        # assert
         logging.info(obj1)
         logging.info(obj2)
         logging.info(obj3)
@@ -204,3 +162,29 @@ class TestWrap:
         assert obj3.attr2 == 13
         assert obj4.attr1 == 17
         assert obj4.attr2 == 19
+
+    @pytest.mark.parametrize("max_int", _max_int)
+    def test_wrap_weakref(self, max_int: int):
+        # arrange
+        class Stub:
+            attr = WrapInt(max_int)
+
+            def __del__(self):
+                logging.info("Del instance %s" % self)
+
+            def __str__(self):
+                return "%s: attr: %s" % (clname(self), self.attr)
+
+        # act
+        obj: Stub = Stub()
+        obj.attr = 0
+        obj2: Stub = Stub()
+        obj2.attr = 0
+        assert type(Stub.attr) is WrapInt
+        # noinspection PyUnresolvedReferences
+        assert len(Stub.attr._vault) == 2
+        del obj
+        del obj2
+        gc.collect()
+        # noinspection PyUnresolvedReferences
+        assert not len(Stub.attr._vault)
