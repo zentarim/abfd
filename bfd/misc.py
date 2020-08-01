@@ -1,12 +1,15 @@
 """
 These are just some wrappers and common functions
 """
-from typing import Dict, Iterable, Any, Optional
+from typing import Dict, Iterable, Any, Optional, Type
 from binascii import unhexlify
 from weakref import WeakSet, ref as wref
 
 
 __all__ = ['clname', 'hr_bytes', 'tobytes', 'WrapInt', 'tryint']
+
+_T = Any
+_C = Type[_T]
 
 
 class WrapInt:
@@ -23,18 +26,11 @@ class WrapInt:
         self._maxval: int = maxval
         self._instances.add(self)
 
-    def __get__(self, instance, owner) -> int:
+    def __get__(self, instance: _C, owner: _T) -> int:
         return self._vault.setdefault(wref(instance), 0)
 
-    def __set__(self, instance, value: int):
-        cur_val: int = self._vault.setdefault(wref(instance), 0)
-        abs_val: int = abs(value) % self._maxval
-        if value >= 0:
-            self._vault[wref(instance)] = value % self._maxval
-        elif abs_val > cur_val:
-            self._vault[wref(instance)] = self._maxval - (abs_val - cur_val)
-        else:
-            self._vault[wref(instance)] = abs_val - cur_val
+    def __set__(self, instance: _C, value: int):
+        self._vault[wref(instance)] = value % self._maxval
 
 
 def clname(cls: object) -> str:     # pragma: no cover

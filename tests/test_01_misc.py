@@ -128,3 +128,79 @@ class TestWrap:
         # assert
         logging.info('EOT')
 
+    def test_wrap_negative(self):
+        # arrange
+        class Stub:
+            attr1 = WrapInt(MAX64)
+            attr2 = WrapInt(MAX64)
+
+            def __del__(self):
+                logging.info("Del instance %s" % self)
+
+            def __str__(self):
+                return "%s: attr1: %s, attr2: %s" % (clname(self), self.attr1, self.attr2)
+
+
+        obj1: Stub = Stub()
+        obj2: Stub = Stub()
+        # act
+        obj1.attr1 = -2
+        obj1.attr2 -= MAX64
+        obj2.attr1 = -5
+        obj2.attr2 -= (MAX64 * 2)
+
+        logging.info(obj1)
+        logging.info(obj2)
+
+        assert obj1.attr1 == (MAX64 - 2)
+        assert obj1.attr2 == 0
+        assert obj2.attr1 == (MAX64 - 5)
+        assert obj2.attr2 == 0
+
+    def test_wrap_independency(self):
+        # arrange
+        class Stub:
+            attr1 = WrapInt(MAX64)
+            attr2 = WrapInt(MAX64)
+
+            def __del__(self):
+                logging.info("Del instance %s" % self)
+
+            def __str__(self):
+                return "%s: attr1: %s, attr2: %s" % (clname(self), self.attr1, self.attr2)
+
+        class Stub2:
+            attr1 = WrapInt(MAX64)
+            attr2 = WrapInt(MAX64)
+
+            def __del__(self):
+                logging.info("Del instance %s" % self)
+
+            def __str__(self):
+                return "%s: attr1: %s, attr2: %s" % (clname(self), self.attr1, self.attr2)
+
+        obj1: Stub = Stub()
+        obj2: Stub2 = Stub2()
+        obj3: Stub = Stub()
+        obj4: Stub2 = Stub2()
+        # act
+        obj1.attr1 += 2
+        obj1.attr2 += 3
+        obj2.attr1 += 5
+        obj2.attr2 += 7
+        obj3.attr1 += 11
+        obj3.attr2 += 13
+        obj4.attr1 += 17
+        obj4.attr2 += 19
+        logging.info(obj1)
+        logging.info(obj2)
+        logging.info(obj3)
+        logging.info(obj4)
+        assert obj1.attr1 == 2
+        assert obj1.attr2 == 3
+        assert obj2.attr1 == 5
+        assert obj2.attr2 == 7
+        assert obj3.attr1 == 11
+        assert obj3.attr2 == 13
+        assert obj4.attr1 == 17
+        assert obj4.attr2 == 19
